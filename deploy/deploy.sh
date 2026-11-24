@@ -53,7 +53,7 @@ cd $APP
 [ -d .venv ] || python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip >/dev/null
 .venv/bin/pip install -q -e .
-echo "    $(git -C $APP log -1 --format='%h %s')"
+echo "    \$(git -C $APP log -1 --format='%h %s')"
 EOF
 
 # ---------------------------------------------------------------- 3. service

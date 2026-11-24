@@ -89,94 +89,129 @@
   }
 
   // ------------------------------------------------------------------ render: graph
+  // text measurement for collision-aware label placement
+  const mctx = document.createElement("canvas").getContext("2d");
+  function textW(s, font) { mctx.font = font; return mctx.measureText(s || "").width; }
+
+  /** Build a label spec (lines + bounding box) for a node at angle a (radians). */
+  function labelSpec(p, a, compact) {
+    const right = Math.cos(a) > 0.2, left = Math.cos(a) < -0.2;
+    const anchor = right ? "start" : left ? "end" : "middle";
+    const dx = right ? 10 : left ? -10 : 0;
+    const below = Math.sin(a) > 0;
+    const wordMax = p.isMore ? 40 : p.cousin ? 16 : compact ? 16 : 22;
+    const word = p.isMore ? p.node.word : trunc(p.node.word, wordMax);
+    const meta = p.isMore ? "" : (p.node.lang_name || "").toUpperCase() + (p.node.roman && !p.cousin ? `  ·  ${p.node.roman}` : "");
+    const gloss = p.isMore || p.cousin || compact || !p.node.gloss ? "" : trunc(p.node.gloss.split(" · ")[0], 34);
+    const lines = [[word, "word"], ...(meta ? [[meta, "meta"]] : []), ...(gloss ? [[gloss, "gloss"]] : [])];
+    const wW = textW(word, `${p.isMore ? "12px Inter" : "16px 'Gentium Plus', Georgia, serif"}`);
+    const w = Math.max(wW, textW(meta, "10.5px Inter, sans-serif"), textW(gloss, "11px Inter, sans-serif")) + 4;
+    const h = 6 + lines.length * 13;
+    // vertical offset: side labels centre on the dot; top/bottom labels sit above/below it
+    const dy = anchor === "middle" ? (below ? 14 : -(h - 4)) : -(h / 2) + 6;
+    const x0 = anchor === "start" ? dx : anchor === "end" ? dx - w : -w / 2;
+    return { anchor, dx, dy, lines, box: { x: x0, y: dy - 2, w, h } };
+  }
+  const overlaps = (a, b, pad = 4) => !(a.x + a.w + pad < b.x || b.x + b.w + pad < a.x || a.y + a.h + pad < b.y || b.y + b.h + pad < a.y);
+
+  /**
+   * Place `items` evenly across a sector on an ellipse; if labels collide, drop
+   * the tail of the list (replaced by a "+n more" node) until they fit.
+   */
+  function placeArc(items, sec, rx, ry, cx, cy, taken, compact, opts = {}) {
+    const maxStep = opts.maxStep ?? 30;
+    for (let n = items.length + 1; n >= 1; n--) {
+      const show = items.slice(0, n <= items.length ? n : items.length);
+      const more = items.length - show.length;
+      const list = show.map((node) => ({ node, cousin: !!opts.cousin }));
+      if (more > 0) list.push({ node: { more, grp: sec.key, word: `+${more} more`, lang_name: "", gloss: "" }, isMore: true });
+      const k = list.length;
+      const full = opts.full && k > 1;
+      const span = full ? 360 : Math.min(sec.span, (k - 1) * maxStep);
+      const step = k > 1 ? span / (full ? k : k - 1) : 0;
+      const start = full ? sec.mid : sec.mid - span / 2;
+      const out = [];
+      let ok = true;
+      for (let i = 0; i < k && ok; i++) {
+        const angle = start + i * step;
+        const a = (angle * Math.PI) / 180;
+        const x = cx + rx * Math.cos(a), y = cy + ry * Math.sin(a);
+        const spec = labelSpec(list[i], a, compact);
+        const box = { x: x + spec.box.x, y: y + spec.box.y, w: spec.box.w, h: spec.box.h };
+        if (taken.some((b) => overlaps(box, b)) || out.some((o) => overlaps(box, o.box))) ok = false;
+        out.push({ ...list[i], angle, x, y, spec, box });
+      }
+      if (ok || k === 1) { taken.push(...out.map((o) => o.box)); return out; }
+    }
+    return [];
+  }
+
   function render(d) {
     svg.replaceChildren();
     const W = svg.clientWidth || 800, H = Math.max(svg.clientHeight, 520);
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     const cx = W / 2, cy = H / 2;
     const compact = W < 600;
-    const labelPad = compact ? 120 : 190;             // room for outward labels
-    const R1 = Math.max(120, Math.min(W, H) / 2 - labelPad);
-    const R2 = R1 + (compact ? 70 : 95);              // cousin ring
-    const lineH = compact ? 30 : 36;                  // vertical space per label
+    // inner ring (direct relations) and outer ring (cousins) are ellipses so
+    // wide screens get wide layouts; labels hang outward from each ring.
+    const rx1 = Math.max(110, W / 2 - (compact ? 120 : 250));
+    const ry1 = Math.max(110, H / 2 - (compact ? 90 : 120));
+    const rx2 = Math.max(rx1 + 60, W / 2 - (compact ? 60 : 130));
+    const ry2 = Math.max(ry1 + 50, H / 2 - 42);
 
-    const defs = el("defs", {}, svg);
-    // soft halo behind centre
     const g = el("g", {}, svg);
     el("circle", { class: "center-ring", cx, cy, r: 78 }, g);
+    // the centre's own label box is reserved so ring labels never cover it
+    const taken = [{ x: cx - 110, y: cy - 60, w: 220, h: 120 }];
 
     const kin = [...d.components.map((n) => ({ ...n, grp: "components" })),
                  ...d.formations.map((n) => ({ ...n, grp: "formations" })),
                  ...d.doublets.map((n) => ({ ...n, grp: "doublets" }))];
     const groups = { ancestors: d.ancestors, descendants: d.descendants, cognates: d.cognates, kin };
 
-    // --- ring 1: direct relations by sector
+    // --- ring 1: direct relations by sector (biggest sectors first so they get room)
     const placed = [];
-    for (const sec of SECTORS) {
+    const order = [...SECTORS].sort((a, b) => (groups[b.key].length - groups[a.key].length));
+    for (const sec of order) {
       const items = groups[sec.key];
       if (!items.length) continue;
-      // how many labels fit along this arc without overlapping (approx)
-      const arcLen = (Math.PI * R1 * sec.span) / 180;
-      const fit = Math.max(2, Math.floor(arcLen / (lineH * 0.75)));
-      const show = items.slice(0, fit);
-      const more = items.length - show.length;
-      const n = show.length + (more > 0 ? 1 : 0);
-      const span = n === 1 ? 0 : Math.min(sec.span, (n - 1) * (sec.span / Math.max(n - 1, 1)));
-      const start = sec.mid - span / 2;
-      const step = n > 1 ? span / (n - 1) : 0;
-      // sector label
       const la = (sec.mid * Math.PI) / 180;
-      el("text", { class: "sector-label", x: cx + Math.cos(la) * (R1 - 44), y: cy + Math.sin(la) * (R1 - 44) + 4,
+      el("text", { class: "sector-label", x: cx + Math.cos(la) * (rx1 - 48), y: cy + Math.sin(la) * (ry1 - 40) + 4,
                    "text-anchor": "middle" }, g).textContent = sec.label;
-      show.forEach((node, i) => placed.push({ node, angle: start + i * step, r: R1 }));
-      if (more > 0) placed.push({ node: { more, grp: sec.key, word: `+${more} more`, lang_name: "", gloss: "" }, angle: start + show.length * step, r: R1, isMore: true });
+      placed.push(...placeArc(items, sec, rx1, ry1, cx, cy, taken, compact));
     }
 
-    // --- ring 2: cousins, spread over the full circle avoiding the top/bottom axes a bit
+    // --- ring 2: cousins around the whole outer ellipse
     const cous = d.cousins || [];
-    const fit2 = Math.max(4, Math.floor((2 * Math.PI * R2) / (lineH * 0.9)));
-    const show2 = cous.slice(0, fit2);
-    show2.forEach((node, i) => placed.push({ node, angle: -90 + 360 * (i + 0.5) / show2.length, r: R2, cousin: true }));
+    if (cous.length) {
+      placed.push(...placeArc(cous, { key: "cousins", mid: -75, span: 360 }, rx2, ry2, cx, cy, taken, compact, { cousin: true, full: true, maxStep: 360 }));
+    }
 
     // --- edges first (under nodes)
     for (const p of placed) {
-      const a = (p.angle * Math.PI) / 180;
-      const x = cx + Math.cos(a) * p.r, y = cy + Math.sin(a) * p.r;
       const rel = p.cousin ? "cousin" : p.node.rel;
       const col = REL_COLOR[rel] || "var(--rel-cousin)";
-      if (p.cousin && p.node.via) {
-        // cousin lines curve toward the shared ancestor's rough direction
-        const q = el("path", { class: "edge cousin", d: `M${cx},${cy} Q${cx + Math.cos(a) * p.r * 0.5},${cy + Math.sin(a) * p.r * 0.5} ${x},${y}`, stroke: col }, g);
+      if (p.cousin) {
+        const mx = cx + (p.x - cx) * 0.55, my = cy + (p.y - cy) * 0.55;
+        const q = el("path", { class: "edge cousin", d: `M${cx},${cy} Q${mx},${my} ${p.x},${p.y}`, stroke: col }, g);
         q.dataset.key = p.node.lang + "|" + p.node.word;
       } else {
-        const line = el("line", { class: "edge", x1: cx, y1: cy, x2: x, y2: y, stroke: p.isMore ? "var(--line)" : col }, g);
+        const line = el("line", { class: "edge", x1: cx, y1: cy, x2: p.x, y2: p.y, stroke: p.isMore ? "var(--line)" : col }, g);
         line.dataset.key = p.node.lang + "|" + p.node.word;
       }
     }
 
     // --- nodes
     for (const p of placed) {
-      const a = (p.angle * Math.PI) / 180;
-      const x = cx + Math.cos(a) * p.r, y = cy + Math.sin(a) * p.r;
       const rel = p.cousin ? "cousin" : p.node.rel;
       const col = REL_COLOR[rel] || "var(--rel-cousin)";
-      const node = el("g", { class: "node" + (p.isMore ? " more" : ""), transform: `translate(${x},${y})` }, g);
+      const node = el("g", { class: "node" + (p.isMore ? " more" : ""), transform: `translate(${p.x},${p.y})` }, g);
       el("circle", { r: p.isMore ? 3 : p.cousin ? 3.5 : 5, fill: p.isMore ? "var(--line)" : col }, node);
-      const right = Math.cos(a) > 0.12, left = Math.cos(a) < -0.12;
-      const anchor = right ? "start" : left ? "end" : "middle";
-      const dx = right ? 10 : left ? -10 : 0;
-      const dy = !right && !left ? (Math.sin(a) > 0 ? 18 : -10) : 0;
-      const wordMax = p.cousin ? 16 : compact ? 16 : 22;
-      const w = el("text", { class: "word" + (p.node.known === false ? " unknown" : ""), x: dx, y: dy + 4, "text-anchor": anchor }, node);
-      w.textContent = p.isMore ? p.node.word : trunc(p.node.word, wordMax);
-      if (!p.isMore) {
-        const meta = el("text", { class: "meta", x: dx, y: dy + 17, "text-anchor": anchor }, node);
-        meta.textContent = (p.node.lang_name || "").toUpperCase() + (p.node.roman ? `  ·  ${p.node.roman}` : "");
-        if (p.node.gloss && !compact) {
-          const gl = el("text", { class: "gloss", x: dx, y: dy + 30, "text-anchor": anchor }, node);
-          gl.textContent = trunc(p.node.gloss.split(" · ")[0], p.cousin ? 26 : 34);
-        }
-      }
+      const { anchor, dx, dy, lines } = p.spec;
+      lines.forEach(([text, cls], i) => {
+        const t = el("text", { class: cls + (cls === "word" && p.node.known === false ? " unknown" : ""), x: dx, y: dy + 12 + i * 13, "text-anchor": anchor }, node);
+        t.textContent = text;
+      });
       // interaction
       if (p.isMore) {
         node.addEventListener("click", () => {
