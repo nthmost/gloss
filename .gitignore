@@ -12,5 +12,6 @@ data/
 .claude/settings.local.json
 # secrets: Anthropic API key for /api/ask (see gloss/ask.py)
 claude_api_key*
+admin_passcode*
 *.key
 .env

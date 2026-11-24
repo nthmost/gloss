@@ -75,9 +75,14 @@ against the same database to walk further along a chain. Answers stream.
 GLOSS_DB=data/gloss.sqlite .venv/bin/uvicorn gloss.app:app --reload
 ```
 
-`GLOSS_ASK_MODEL` (default `claude-sonnet-5`) and `GLOSS_ASK_EFFORT` (default `medium`)
-tune it; `GLOSS_ASK_TOKEN` turns on an optional passphrase gate (off by default).
 The transcript lives in the browser; the server is stateless.
+
+**Admin.** `/admin` is a small settings page guarded by a passcode (`GLOSS_ADMIN_PASSCODE`,
+or a file named `admin_passcode` in the repo root, gitignored). It switches the drawer
+on and off, sets an optional visitor passphrase, the model, effort and a per-IP rate
+limit. Settings are saved to `GLOSS_SETTINGS` (default `data/settings.json`) and picked
+up by every worker without a restart; `GLOSS_ASK_MODEL`, `GLOSS_ASK_EFFORT` and
+`GLOSS_ASK_TOKEN` only supply the defaults.
 
 ## Deployment
 

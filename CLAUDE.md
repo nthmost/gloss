@@ -10,8 +10,10 @@ Full narrative of the current version: `docs/versions/` (latest: v0.1).
 - `gloss/norm.py` — `fold` (search key) and `light_fold` (entry-name normalization); see v0.1 doc for why two
 - `gloss/ask.py` — `POST /api/ask`: streams Claude (Sonnet) answers about the loaded page; the whole graph is
   rendered into the system prompt and Claude gets `lookup_word`/`search_words` tools over the DB. Key from
-  `ANTHROPIC_API_KEY` or `claude_api_key*` in the repo root (gitignored). No passphrase in production
-  (`GLOSS_ASK_TOKEN` exists as an opt-in gate but is deliberately unset).
+  `ANTHROPIC_API_KEY` or `claude_api_key*` in the repo root (gitignored).
+- `gloss/settings.py` + `static/admin.html` — `/admin` (passcode from `GLOSS_ADMIN_PASSCODE` or `admin_passcode`
+  in the repo root, gitignored) edits the ask settings: on/off, visitor passphrase, model, effort, rate limit.
+  Saved to `GLOSS_SETTINGS` (`/opt/gloss/data/settings.json` on zephyr); env vars are only the defaults.
   Production secrets: `~/projects/nthmost-systems/.secrets/gloss-ask.env` → `zephyr:/opt/gloss/ask.env` via deploy.sh.
 - `static/` — vanilla JS + SVG radial UI, no build step
 - `deploy/` — `deploy.sh` (zephyr: code/venv/systemd/Apache/certbot/Gandi DNS), `refresh.sh` (loki weekly cron)

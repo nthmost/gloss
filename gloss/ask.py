@@ -20,9 +20,8 @@ each turn. Only text is kept between turns (tool traces are dropped).
 Environment:
     ANTHROPIC_API_KEY           the key, or
     GLOSS_ANTHROPIC_KEY_FILE    a file holding it (default: claude_api_key* in the repo root)
-    GLOSS_ASK_TOKEN             if set, callers must send it as Authorization: Bearer …
-    GLOSS_ASK_MODEL             default claude-sonnet-5
-    GLOSS_ASK_EFFORT            low | medium | high (default medium)
+Everything else (on/off, passphrase, model, effort, rate limit) lives in
+gloss/settings.py and is editable at /admin.
 """
 
 from __future__ import annotations
@@ -41,19 +40,17 @@ from typing import Any, AsyncIterator
 import anthropic
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+
+from . import settings
 
 log = logging.getLogger("gloss.ask")
 router = APIRouter()
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL = os.environ.get("GLOSS_ASK_MODEL", "claude-sonnet-5")
-EFFORT = os.environ.get("GLOSS_ASK_EFFORT", "medium")
 MAX_TOKENS = 8192
-MAX_TOOL_ROUNDS = 8        # tool calls per question before we stop Claude
 MAX_HISTORY = 40           # messages the client may send back
 MAX_MESSAGE_CHARS = 6000
-RATE_LIMIT = (30, 600)     # requests per window-seconds, per client IP, per worker
 
 
 def _read_secret(env: str, file_env: str, default_glob: str | None = None) -> str | None:
@@ -69,7 +66,6 @@ def _read_secret(env: str, file_env: str, default_glob: str | None = None) -> st
 
 
 API_KEY = _read_secret("ANTHROPIC_API_KEY", "GLOSS_ANTHROPIC_KEY_FILE", "claude_api_key*")
-TOKEN = _read_secret("GLOSS_ASK_TOKEN", "GLOSS_ASK_TOKEN_FILE")
 
 _client: anthropic.AsyncAnthropic | None = None
 
@@ -265,8 +261,8 @@ class AskBody(BaseModel):
 _hits: dict[str, deque] = defaultdict(deque)
 
 
-def rate_limited(ip: str) -> bool:
-    n, window = RATE_LIMIT
+def rate_limited(ip: str, n: int, window: float) -> bool:
+    """Sliding window per IP, per worker process: a backstop, not accounting."""
     now = time.monotonic()
     q = _hits[ip]
     while q and q[0] < now - window:
@@ -277,27 +273,34 @@ def rate_limited(ip: str) -> bool:
     return False
 
 
-def check_token(request: Request) -> None:
-    if not TOKEN:
-        return
+def bearer(request: Request) -> str:
     auth = request.headers.get("authorization", "")
-    given = auth[7:] if auth.lower().startswith("bearer ") else request.headers.get("x-gloss-token", "")
-    if not hmac.compare_digest(given.strip(), TOKEN):
+    return (auth[7:] if auth.lower().startswith("bearer ") else request.headers.get("x-gloss-token", "")).strip()
+
+
+def check_token(request: Request, cfg: settings.Settings) -> None:
+    if not cfg.gate_on:
+        return
+    if not hmac.compare_digest(bearer(request), cfg.token):
         raise HTTPException(401, "ask token required")
 
 
 @router.get("/api/ask")
 def ask_config():
-    return {"enabled": bool(API_KEY), "token_required": bool(TOKEN), "model": MODEL}
+    cfg = settings.current()
+    return {"enabled": bool(API_KEY) and cfg.ask_enabled, "token_required": cfg.gate_on, "model": cfg.model}
 
 
 @router.post("/api/ask")
 async def ask(body: AskBody, request: Request):
+    cfg = settings.current()
     if not API_KEY:
         raise HTTPException(503, "ask is not configured on this server")
-    check_token(request)
+    if not cfg.ask_enabled:
+        raise HTTPException(503, "ask is switched off right now")
+    check_token(request, cfg)
     ip = request.client.host if request.client else "?"
-    if rate_limited(ip):
+    if rate_limited(ip, cfg.rate_limit_n, cfg.rate_limit_minutes * 60):
         raise HTTPException(429, "slow down a little")
     if body.messages[-1].role != "user":
         raise HTTPException(400, "last message must be from the user")
@@ -316,14 +319,14 @@ async def ask(body: AskBody, request: Request):
         messages.append({"role": m.role, "content": text})
 
     async def gen() -> AsyncIterator[bytes]:
-        async for ev in converse(context, messages):
+        async for ev in converse(context, messages, cfg):
             yield (json.dumps(ev, ensure_ascii=False) + "\n").encode()
 
     return StreamingResponse(gen(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def converse(context: str, messages: list[dict]) -> AsyncIterator[dict]:
+async def converse(context: str, messages: list[dict], cfg: settings.Settings) -> AsyncIterator[dict]:
     """Drive one user turn to completion, streaming text and running tools."""
     system = [
         {"type": "text", "text": SYSTEM},
@@ -331,15 +334,15 @@ async def converse(context: str, messages: list[dict]) -> AsyncIterator[dict]:
         {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
     ]
     json_retries = 0
-    for _round in range(MAX_TOOL_ROUNDS + 1):
+    for _round in range(cfg.max_tool_rounds + 1):
         try:
             async with client().messages.stream(
-                model=MODEL,
+                model=cfg.model,
                 max_tokens=MAX_TOKENS,
                 system=system,
                 tools=TOOLS,
                 thinking={"type": "adaptive"},
-                output_config={"effort": EFFORT},
+                output_config={"effort": cfg.effort},
                 messages=messages,
             ) as stream:
                 async for event in stream:
@@ -378,7 +381,7 @@ async def converse(context: str, messages: list[dict]) -> AsyncIterator[dict]:
         if final.stop_reason == "max_tokens":
             yield {"type": "error", "message": "The answer ran too long and was cut off."}
             return
-        if _round == MAX_TOOL_ROUNDS:
+        if _round == cfg.max_tool_rounds:
             yield {"type": "error", "message": "Too many database lookups for one question; try a narrower one."}
             return
 
@@ -408,3 +411,56 @@ def _usage(msg) -> dict:
         "cache_read": getattr(u, "cache_read_input_tokens", 0) or 0,
         "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# admin: /admin page + /api/admin/settings, guarded by the admin passcode
+# ---------------------------------------------------------------------------
+
+ADMIN_FAILS = (10, 600)    # wrong passcodes per IP per window before we stop checking
+_admin_fails: dict[str, deque] = defaultdict(deque)
+
+
+def check_admin(request: Request) -> None:
+    if not settings.ADMIN_PASSCODE:
+        raise HTTPException(503, "no admin passcode configured on this server")
+    ip = request.client.host if request.client else "?"
+    n, window = ADMIN_FAILS
+    now = time.monotonic()
+    q = _admin_fails[ip]
+    while q and q[0] < now - window:
+        q.popleft()
+    if len(q) >= n:
+        raise HTTPException(429, "too many wrong passcodes; wait a few minutes")
+    if not hmac.compare_digest(bearer(request), settings.ADMIN_PASSCODE):
+        q.append(now)
+        raise HTTPException(401, "wrong passcode")
+
+
+def _admin_view() -> dict:
+    cfg = settings.current()
+    return {
+        "settings": cfg.model_dump(),
+        "defaults": settings.defaults().model_dump(),
+        "models": settings.MODELS,
+        "api_key_present": bool(API_KEY),
+        "settings_path": str(settings.SETTINGS_PATH),
+    }
+
+
+@router.get("/api/admin/settings")
+def admin_get(request: Request):
+    check_admin(request)
+    return _admin_view()
+
+
+@router.put("/api/admin/settings")
+def admin_put(update: dict, request: Request):
+    check_admin(request)
+    try:
+        settings.save(update)
+    except ValidationError as e:
+        raise HTTPException(422, "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors()))
+    except OSError as e:
+        raise HTTPException(500, f"could not write settings: {e}")
+    return _admin_view()

@@ -410,3 +410,8 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 @app.get("/w/{lang}/{word:path}")
 def index(lang: str | None = None, word: str | None = None):
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/admin")
+def admin_page():
+    return FileResponse(STATIC / "admin.html", headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})

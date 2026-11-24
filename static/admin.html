@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>gloss admin</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='5' fill='%23c0652b'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%232f7a4e' stroke-width='2' stroke-dasharray='6 4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gentium+Plus:ital,wght@0,400;0,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .admin { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; width: 100%; }
+  .admin h1 { font-family: var(--serif); font-weight: 400; font-size: 30px; margin: 0 0 4px; }
+  .admin .sub { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+  .admin fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 6px; margin: 0 0 16px; }
+  .admin legend { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); padding: 0 6px; }
+  .row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 6px 14px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row label { font-size: 14px; }
+  .row .hint { grid-column: 2; color: var(--muted); font-size: 12px; }
+  .row input[type="text"], .row input[type="password"], .row input[type="number"], .row select {
+    font: inherit; font-size: 14px; background: var(--paper-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; width: 100%; min-width: 0;
+  }
+  .row input:focus, .row select:focus { border-color: var(--accent); }
+  .row input[type="number"] { width: 90px; }
+  .row .inline { display: flex; gap: 8px; align-items: center; }
+  .row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+  .btn { font: inherit; font-size: 14px; color: var(--paper); background: var(--accent); border: 0; border-radius: 999px; padding: 9px 18px; cursor: pointer; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.err { color: var(--rel-doublet); }
+  .status.ok { color: var(--rel-inh); }
+  .badge { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.on { color: var(--rel-inh); border-color: var(--rel-inh); }
+  .badge.off { color: var(--rel-doublet); border-color: var(--rel-doublet); }
+  #login { display: flex; gap: 8px; max-width: 360px; }
+  #login input { flex: 1; font: inherit; font-size: 15px; background: var(--paper-2); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; outline: none; }
+  #login input:focus { border-color: var(--accent); }
+  @media (max-width: 520px) { .row { grid-template-columns: 1fr; } .row .hint { grid-column: 1; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/" id="brand"><span class="brand-dot"></span>gloss</a>
+  <span class="status" style="margin-left:auto">admin</span>
+</header>
+
+<main class="admin">
+  <h1>Ask settings</h1>
+  <p class="sub">How the “ask ✦” drawer talks to Claude. Changes apply immediately to every worker; no restart.</p>
+
+  <form id="login" hidden autocomplete="off">
+    <input id="passcode" type="password" placeholder="admin passcode" aria-label="Admin passcode" autofocus>
+    <button class="btn" type="submit">enter</button>
+  </form>
+
+  <form id="form" hidden>
+    <fieldset>
+      <legend>service</legend>
+      <div class="row">
+        <label>API key</label>
+        <div><span class="badge" id="key-badge">…</span> <span class="hint" id="key-hint"></span></div>
+      </div>
+      <div class="row">
+        <label for="ask_enabled">Ask drawer</label>
+        <div class="inline"><input type="checkbox" id="ask_enabled"> <span class="hint">off hides the button and returns 503 to the API</span></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>access</legend>
+      <div class="row">
+        <label for="token_required">Require a passphrase</label>
+        <div class="inline"><input type="checkbox" id="token_required"> <span class="hint">visitors enter it once per browser</span></div>
+      </div>
+      <div class="row">
+        <label for="token">Passphrase</label>
+        <input type="text" id="token" placeholder="leave empty = no gate" spellcheck="false">
+      </div>
+      <div class="row">
+        <label>Rate limit</label>
+        <div class="inline"><input type="number" id="rate_limit_n" min="1" max="10000"> <span>questions per</span> <input type="number" id="rate_limit_minutes" min="1" max="1440"> <span>min, per IP</span></div>
+        <span class="hint">counted per server worker, so the real cap is roughly double</span>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>model</legend>
+      <div class="row">
+        <label for="model">Model</label>
+        <div class="inline"><select id="model"></select></div>
+        <span class="hint">pick “other…” to type any model id</span>
+      </div>
+      <div class="row" id="model-other-row" hidden>
+        <label for="model_other">Model id</label>
+        <input type="text" id="model_other" placeholder="claude-…" spellcheck="false">
+      </div>
+      <div class="row">
+        <label for="effort">Effort</label>
+        <div class="inline"><select id="effort"><option>low</option><option>medium</option><option>high</option></select></div>
+        <span class="hint">how hard it thinks per question; medium is quick and usually enough</span>
+      </div>
+      <div class="row">
+        <label for="max_tool_rounds">Max lookups</label>
+        <div class="inline"><input type="number" id="max_tool_rounds" min="0" max="20"> <span class="hint">database lookups allowed per question</span></div>
+      </div>
+    </fieldset>
+
+    <div class="actions">
+      <button class="btn" type="submit" id="save">save</button>
+      <button class="ghost" type="button" id="reset">reset to defaults</button>
+      <span class="status" id="status"></span>
+      <button class="ghost" type="button" id="logout" style="margin-left:auto">log out</button>
+    </div>
+    <p class="sub" style="margin-top:16px">Saved to <code id="path"></code> on the server. Defaults come from the environment.</p>
+  </form>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (s) => document.querySelector(s);
+  const login = $("#login"), form = $("#form"), status = $("#status");
+  const FIELDS = ["ask_enabled", "token_required", "token", "effort", "rate_limit_n", "rate_limit_minutes", "max_tool_rounds"];
+  const pass = {
+    get: () => { try { return sessionStorage.getItem("gloss.admin") || ""; } catch { return ""; } },
+    set: (v) => { try { v ? sessionStorage.setItem("gloss.admin", v) : sessionStorage.removeItem("gloss.admin"); } catch { /* ignore */ } },
+  };
+  let view = null;
+
+  async function call(method, body) {
+    const r = await fetch("/api/admin/settings", {
+      method, headers: { authorization: `Bearer ${pass.get()}`, "content-type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!r.ok) {
+      let msg = `${r.status}`;
+      try { msg = (await r.json()).detail || msg; } catch { /* not json */ }
+      const e = new Error(msg); e.status = r.status; throw e;
+    }
+    return r.json();
+  }
+
+  function say(msg, cls = "") { status.textContent = msg; status.className = "status " + cls; }
+
+  function fill(v) {
+    view = v;
+    const s = v.settings;
+    for (const k of FIELDS) {
+      const el = document.getElementById(k);
+      if (el.type === "checkbox") el.checked = !!s[k]; else el.value = s[k];
+    }
+    const sel = $("#model");
+    sel.innerHTML = v.models.map((m) => `<option>${m}</option>`).join("") + `<option value="__other">other…</option>`;
+    if (v.models.includes(s.model)) { sel.value = s.model; $("#model-other-row").hidden = true; }
+    else { sel.value = "__other"; $("#model-other-row").hidden = false; $("#model_other").value = s.model; }
+    $("#key-badge").textContent = v.api_key_present ? "present" : "missing";
+    $("#key-badge").className = "badge " + (v.api_key_present ? "on" : "off");
+    $("#key-hint").textContent = v.api_key_present ? "" : "set ANTHROPIC_API_KEY on the server; nothing here will work until then";
+    $("#path").textContent = v.settings_path;
+  }
+
+  function read() {
+    const out = {};
+    for (const k of FIELDS) {
+      const el = document.getElementById(k);
+      out[k] = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value.trim();
+    }
+    out.model = $("#model").value === "__other" ? $("#model_other").value.trim() : $("#model").value;
+    return out;
+  }
+
+  async function show() {
+    try {
+      fill(await call("GET"));
+      login.hidden = true; form.hidden = false; say("");
+    } catch (e) {
+      if (e.status === 401 || e.status === 429) { pass.set(""); login.hidden = false; form.hidden = true; }
+      say(e.message, "err");
+      if (e.status !== 401 && e.status !== 429) { login.hidden = false; form.hidden = true; }
+      $("#passcode").focus();
+    }
+  }
+
+  login.addEventListener("submit", (ev) => { ev.preventDefault(); pass.set($("#passcode").value.trim()); $("#passcode").value = ""; show(); });
+  $("#model").addEventListener("change", () => { $("#model-other-row").hidden = $("#model").value !== "__other"; if ($("#model").value === "__other") $("#model_other").focus(); });
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    $("#save").disabled = true; say("saving…");
+    try { fill(await call("PUT", read())); say("saved", "ok"); }
+    catch (e) { say(e.message, "err"); if (e.status === 401) { pass.set(""); show(); } }
+    $("#save").disabled = false;
+  });
+  $("#reset").addEventListener("click", async () => {
+    $("#save").disabled = true; say("resetting…");
+    try { fill(await call("PUT", view.defaults)); say("reset to defaults", "ok"); }
+    catch (e) { say(e.message, "err"); }
+    $("#save").disabled = false;
+  });
+  $("#logout").addEventListener("click", () => { pass.set(""); form.hidden = true; login.hidden = false; say(""); $("#passcode").focus(); });
+
+  if (pass.get()) show(); else { login.hidden = false; $("#passcode").focus(); }
+})();
+</script>
+</body>
+</html>
