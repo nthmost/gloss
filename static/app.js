@@ -72,7 +72,9 @@
       graphData = await api(`/api/graph/${encodeURIComponent(lang)}/${encodeURIComponent(word)}`);
     } catch (e) {
       graphData = null;
-      showEmpty(`Couldn't find “${esc(word)}” in ${esc(lang)}.`);
+      if (/^503/.test(e.message)) showEmpty("The dictionary is being rebuilt right now — try again in a few minutes.");
+      else if (/^404/.test(e.message)) showEmpty(`Couldn't find “${word}” in ${lang}.`);
+      else showEmpty("Something went wrong talking to the server.");
       return;
     }
     empty.hidden = true;
