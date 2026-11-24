@@ -73,6 +73,11 @@ the weekly swap needs no restart.
 - `deploy/refresh.sh` — the weekly cron on the build host.
 - `deploy/gloss.service`, `deploy/apache/*` — the installed configs.
 
+## Versions
+
+Each iteration is documented in [`docs/versions/`](docs/versions/) and tagged as a
+GitHub release. Current: [v0.1](docs/versions/v0.1.md).
+
 ## Licence
 
 Code MIT. Data from Wiktionary, CC BY-SA 4.0.
