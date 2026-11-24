@@ -72,12 +72,12 @@ against the same database to walk further along a chain. Answers stream.
 
 ```sh
 # the key: ANTHROPIC_API_KEY, or a file named claude_api_key* in the repo root (gitignored)
-# optional passphrase so a public server doesn't spend your budget for strangers:
-GLOSS_ASK_TOKEN=some-phrase GLOSS_DB=data/gloss.sqlite .venv/bin/uvicorn gloss.app:app --reload
+GLOSS_DB=data/gloss.sqlite .venv/bin/uvicorn gloss.app:app --reload
 ```
 
 `GLOSS_ASK_MODEL` (default `claude-sonnet-5`) and `GLOSS_ASK_EFFORT` (default `medium`)
-tune it. The transcript lives in the browser; the server is stateless.
+tune it; `GLOSS_ASK_TOKEN` turns on an optional passphrase gate (off by default).
+The transcript lives in the browser; the server is stateless.
 
 ## Deployment
 
