@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gloss</title>
+<meta name="description" content="Look up any word in any language and surf where its roots travelled.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='5' fill='%23c0652b'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%232f7a4e' stroke-width='2' stroke-dasharray='6 4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gentium+Plus:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/" id="brand"><span class="brand-dot"></span>gloss</a>
+  <form class="search" id="search-form" autocomplete="off" role="search">
+    <input id="q" type="search" placeholder="any word, any language…" aria-label="Search for a word" spellcheck="false" autofocus>
+    <div id="suggest" class="suggest" hidden></div>
+  </form>
+  <button class="ghost" id="random" type="button" title="A random well-connected word">surprise me</button>
+</header>
+
+<main id="main">
+  <section class="stage" id="stage">
+    <svg id="graph" role="img" aria-label="Radial map of related words"></svg>
+    <div id="tip" class="tip" hidden></div>
+    <div id="empty" class="empty">
+      <h1>Where did that word come from, and where did it go?</h1>
+      <p>Type a word in any script. The word you choose sits in the middle; its ancestors rise above it, its descendants fall below, cognates and kin sit at its sides. Click any word to make it the centre.</p>
+      <p class="examples" id="examples"></p>
+      <p class="credit" id="credit"></p>
+    </div>
+  </section>
+
+  <aside class="panel" id="panel" hidden>
+    <div class="panel-head">
+      <div class="panel-lang" id="p-lang"></div>
+      <h2 class="panel-word" id="p-word"></h2>
+      <div class="panel-roman" id="p-roman"></div>
+    </div>
+    <div id="p-entries" class="entries"></div>
+    <div id="p-groups" class="groups"></div>
+    <p class="panel-foot"><a id="p-wikt" target="_blank" rel="noopener">View on Wiktionary ↗</a></p>
+  </aside>
+</main>
+
+<footer class="legend" id="legend"></footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+data/
+*.sqlite
+*.sqlite.building
+*.jsonl
+*.jsonl.gz
+.DS_Store
