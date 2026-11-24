@@ -3,6 +3,7 @@
 Environment:
     GLOSS_DB      path to the sqlite built by gloss.ingest (default ./data/gloss.sqlite)
     GLOSS_STATIC  path to the static/ directory (default ../static relative to this file)
+    (see gloss/ask.py for the Claude "ask about this page" settings)
 
 The database is opened read-only. If the file is replaced on disk (weekly
 refresh does an atomic rename), the next request notices the new inode and
@@ -387,6 +388,15 @@ def random_word(min_edges: int = 6):
         if n >= min_edges:
             return {"lang": hub, "lang_name": names.get(hub, hub), "word": r["word"]}
     raise HTTPException(404, "no suitable word")
+
+
+# ---------------------------------------------------------------------------
+# ask Claude about the page (gloss/ask.py)
+# ---------------------------------------------------------------------------
+
+from .ask import router as ask_router  # noqa: E402 — needs graph/search defined above
+
+app.include_router(ask_router)
 
 
 # ---------------------------------------------------------------------------

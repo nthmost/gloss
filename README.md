@@ -61,6 +61,24 @@ GLOSS_DB=data/gloss.sqlite .venv/bin/uvicorn gloss.app:app --reload
 API: `/api/search?q=…`, `/api/graph/{lang}/{word}`, `/api/word/{lang}/{word}`,
 `/api/langs`, `/api/random`, `/api/meta`. Interactive docs at `/api/docs`.
 
+### Ask Claude about the page
+
+With an Anthropic API key the page grows an **ask ✦** button: a chat drawer where
+Claude Sonnet answers questions about the words on screen. The server renders the
+whole loaded graph (centre entries, ancestors, descendants, cognates, kin, cousins)
+into Claude's context, so you can ask "why is the Greek one spelled like that?"
+without restating anything, and Claude can call `lookup_word` / `search_words`
+against the same database to walk further along a chain. Answers stream.
+
+```sh
+# the key: ANTHROPIC_API_KEY, or a file named claude_api_key* in the repo root (gitignored)
+# optional passphrase so a public server doesn't spend your budget for strangers:
+GLOSS_ASK_TOKEN=some-phrase GLOSS_DB=data/gloss.sqlite .venv/bin/uvicorn gloss.app:app --reload
+```
+
+`GLOSS_ASK_MODEL` (default `claude-sonnet-5`) and `GLOSS_ASK_EFFORT` (default `medium`)
+tune it. The transcript lives in the browser; the server is stateless.
+
 ## Deployment
 
 Two hosts: a **build host** with RAM and disk does the weekly ingest and ships

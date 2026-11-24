@@ -81,6 +81,7 @@
     panel.hidden = false;
     render(graphData);
     renderPanel(graphData);
+    askPageChanged();
   }
 
   function showEmpty(msg) {
@@ -88,6 +89,7 @@
     panel.hidden = true;
     svg.replaceChildren();
     if (msg) empty.querySelector("h1").textContent = msg;
+    askPageChanged();
   }
 
   // ------------------------------------------------------------------ render: graph
@@ -363,6 +365,144 @@
     try { const r = await api("/api/random"); navigate(r.lang, r.word); } catch { /* ignore */ }
   });
   $("#brand").addEventListener("click", (ev) => { ev.preventDefault(); history.pushState({}, "", "/"); current = null; graphData = null; qInput.value = ""; document.title = "gloss"; showEmpty("Where did that word come from, and where did it go?"); });
+
+  // ------------------------------------------------------------------ ask Claude about the page
+  // The server renders the current page (centre word + every relative shown)
+  // into Claude's context, so questions can just say "that Latin one".
+  // The transcript lives here in the browser and is sent back each turn.
+  const ask = $("#ask"), askFab = $("#ask-fab"), askLog = $("#ask-log"), askForm = $("#ask-form"), askQ = $("#ask-q");
+  const askGate = $("#ask-gate"), askTokenInput = $("#ask-token"), askSend = $("#ask-send");
+  let askCfg = null;            // {enabled, token_required, model}
+  let askHistory = [];          // [{role, content, page}]
+  let askBusy = false;
+  const askToken = {
+    get: () => { try { return localStorage.getItem("gloss.askToken") || ""; } catch { return ""; } },
+    set: (v) => { try { v ? localStorage.setItem("gloss.askToken", v) : localStorage.removeItem("gloss.askToken"); } catch { /* private mode */ } },
+  };
+
+  // tiny markdown: paragraphs, hyphen lists, **bold**, `code`, and `word (lang)`
+  // becomes a link when that word is on the page. No *italics*: asterisks mean
+  // reconstruction in this domain.
+  function askMd(s) {
+    const inline = (t) => {
+      let h = esc(t);
+      h = h.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+      h = h.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
+      return h;
+    };
+    const blocks = s.replace(/\r/g, "").split(/\n{2,}/);
+    return blocks.map((b) => {
+      const lines = b.split("\n");
+      if (lines.length && lines.every((l) => /^\s*-\s+/.test(l))) {
+        return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*-\s+/, ""))}</li>`).join("")}</ul>`;
+      }
+      return `<p>${lines.map(inline).join("<br>")}</p>`;
+    }).join("");
+  }
+
+  function askAdd(cls, html) {
+    const d = document.createElement("div");
+    d.className = cls;
+    d.innerHTML = html;
+    askLog.appendChild(d);
+    askLog.scrollTop = askLog.scrollHeight;
+    return d;
+  }
+
+  function askPageChanged() {
+    const on = !!(askCfg && askCfg.enabled && current);
+    askFab.hidden = !on || !ask.hidden;
+    if (!on) { ask.hidden = true; return; }
+    $("#ask-word").textContent = current.word;
+  }
+
+  function askOpen(open) {
+    ask.hidden = !open;
+    askFab.hidden = open || !current;
+    if (open) {
+      const needsToken = askCfg.token_required && !askToken.get();
+      askGate.hidden = !needsToken;
+      askForm.hidden = needsToken;
+      (needsToken ? askTokenInput : askQ).focus();
+    }
+  }
+
+  async function askSubmit() {
+    const q = askQ.value.trim();
+    if (!q || askBusy || !current) return;
+    askQ.value = "";
+    askBusy = true; askSend.disabled = true;
+    const page = { lang: current.lang, word: current.word };
+    askHistory.push({ role: "user", content: q, page });
+    askAdd("ask-msg user", esc(q));
+    const out = askAdd("ask-msg claude streaming", "");
+    let text = "";
+    const headers = { "content-type": "application/json" };
+    if (askToken.get()) headers.authorization = `Bearer ${askToken.get()}`;
+    try {
+      const r = await fetch("/api/ask", { method: "POST", headers, body: JSON.stringify({ ...page, messages: askHistory }) });
+      if (!r.ok) {
+        let msg = `${r.status}`;
+        try { msg = (await r.json()).detail || msg; } catch { /* not json */ }
+        if (r.status === 401) { askToken.set(""); askGate.hidden = false; askForm.hidden = true; msg = "That passphrase was not accepted."; }
+        throw new Error(msg);
+      }
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          const ev = JSON.parse(line);
+          if (ev.type === "text") {
+            text += ev.text;
+            out.innerHTML = askMd(text);
+            askLog.scrollTop = askLog.scrollHeight;
+          } else if (ev.type === "tool") {
+            const i = ev.input || {};
+            const label = ev.name === "lookup_word"
+              ? `looking up <a href="${wordUrl(i.lang, i.word)}" data-lang="${esc(i.lang)}" data-word="${esc(i.word)}">${esc(i.word)}</a> (${esc(i.lang)})…`
+              : `searching for “${esc(i.q)}”${i.lang ? ` in ${esc(i.lang)}` : ""}…`;
+            const t = askAdd("ask-tool", label);
+            askLog.insertBefore(t, out);
+            t.querySelectorAll("a[data-lang]").forEach((a) => a.addEventListener("click", (ev2) => { ev2.preventDefault(); navigate(a.dataset.lang, a.dataset.word); }));
+          } else if (ev.type === "error") {
+            askAdd("ask-err", esc(ev.message));
+          } else if (ev.type === "done" && ev.usage) {
+            console.debug("ask usage", ev.usage);
+          }
+        }
+      }
+    } catch (e) {
+      askAdd("ask-err", esc(e.message || "Something went wrong."));
+    }
+    out.classList.remove("streaming");
+    if (text) askHistory.push({ role: "assistant", content: text });
+    else { askHistory.pop(); if (!out.innerHTML) out.remove(); }
+    askBusy = false; askSend.disabled = false;
+    askQ.focus();
+  }
+
+  askFab.addEventListener("click", () => askOpen(true));
+  $("#ask-close").addEventListener("click", () => askOpen(false));
+  $("#ask-clear").addEventListener("click", () => { askHistory = []; askLog.querySelectorAll(".ask-msg, .ask-tool, .ask-err").forEach((n) => n.remove()); askQ.focus(); });
+  askForm.addEventListener("submit", (ev) => { ev.preventDefault(); askSubmit(); });
+  askQ.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); askSubmit(); } });
+  askGate.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const t = askTokenInput.value.trim();
+    if (!t) return;
+    askToken.set(t); askTokenInput.value = "";
+    askGate.hidden = true; askForm.hidden = false; askQ.focus();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !ask.hidden && document.activeElement !== qInput) askOpen(false);
+  });
+  api("/api/ask").then((c) => { askCfg = c; askPageChanged(); }).catch(() => {});
 
   // ------------------------------------------------------------------ legend, examples, routing
   $("#legend").innerHTML = ["inh", "bor", "der", "calque", "root", "cog", "affix", "doublet", "cousin"]

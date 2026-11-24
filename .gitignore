@@ -10,3 +10,7 @@ data/
 *.jsonl.gz
 .DS_Store
 .claude/settings.local.json
+# secrets: Anthropic API key for /api/ask (see gloss/ask.py)
+claude_api_key*
+*.key
+.env

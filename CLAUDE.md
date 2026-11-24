@@ -8,6 +8,10 @@ Full narrative of the current version: `docs/versions/` (latest: v0.1).
 - `gloss/ingest.py` — kaikki.org JSONL → SQLite (entries, words + FTS5, edges, langs)
 - `gloss/app.py` — FastAPI: `/api/search`, `/api/graph/{lang}/{word}`, `/api/word/…`, `/api/random`, `/api/meta`
 - `gloss/norm.py` — `fold` (search key) and `light_fold` (entry-name normalization); see v0.1 doc for why two
+- `gloss/ask.py` — `POST /api/ask`: streams Claude (Sonnet) answers about the loaded page; the whole graph is
+  rendered into the system prompt and Claude gets `lookup_word`/`search_words` tools over the DB. Key from
+  `ANTHROPIC_API_KEY` or `claude_api_key*` in the repo root (gitignored); optional `GLOSS_ASK_TOKEN` passphrase.
+  Production secrets: `~/projects/nthmost-systems/.secrets/gloss-ask.env` → `zephyr:/opt/gloss/ask.env` via deploy.sh.
 - `static/` — vanilla JS + SVG radial UI, no build step
 - `deploy/` — `deploy.sh` (zephyr: code/venv/systemd/Apache/certbot/Gandi DNS), `refresh.sh` (loki weekly cron)
 

@@ -5,8 +5,9 @@
 # What it does (idempotent):
 #   1. DNS: ensure <sub>.<domain> A record exists at Gandi LiveDNS (needs GANDI_KEY_FILE)
 #   2. git clone/pull the repo into /opt/gloss/app, build its venv
-#   3. install the systemd unit (port 8902) and (re)start it
-#   4. Apache: bootstrap http vhost → certbot webroot → final http+https vhosts
+#   3. ship the /api/ask secrets (ANTHROPIC_API_KEY, GLOSS_ASK_TOKEN) from ASK_ENV_FILE, if present
+#   4. install the systemd unit (port 8902) and (re)start it
+#   5. Apache: bootstrap http vhost → certbot webroot → final http+https vhosts
 #
 # The database is NOT deployed here; deploy/refresh.sh on the build host ships it.
 # Until the first refresh lands, the app answers 503 on /api/*.
@@ -19,6 +20,7 @@ REPO=${REPO:-https://github.com/nthmost/gloss.git}
 BRANCH=${BRANCH:-main}
 APP=/opt/gloss/app
 GANDI_KEY_FILE=${GANDI_KEY_FILE:-$HOME/projects/nthmost-systems/.secrets/gandi-apikey}
+ASK_ENV_FILE=${ASK_ENV_FILE:-$HOME/projects/nthmost-systems/.secrets/gloss-ask.env}
 ZONE=${DOMAIN#*.}          # nthmost.com
 SUB=${DOMAIN%%.*}          # gloss
 
@@ -56,12 +58,21 @@ cd $APP
 echo "    \$(git -C $APP log -1 --format='%h %s')"
 EOF
 
-# ---------------------------------------------------------------- 3. service
+# ---------------------------------------------------------------- 3. ask secrets
+if [ -f "$ASK_ENV_FILE" ]; then
+  echo "==> Ask: shipping $ASK_ENV_FILE → $HOST:/opt/gloss/ask.env"
+  scp -q "$ASK_ENV_FILE" "$HOST:/opt/gloss/ask.env"
+  ssh "$HOST" "chmod 600 /opt/gloss/ask.env"
+else
+  echo "==> Ask: no $ASK_ENV_FILE — /api/ask stays disabled"
+fi
+
+# ---------------------------------------------------------------- 4. service
 echo "==> Service: gloss.service"
 scp -q "$here/gloss.service" "$HOST:/tmp/gloss.service"
 ssh "$HOST" "sudo mv /tmp/gloss.service /etc/systemd/system/gloss.service && sudo systemctl daemon-reload && sudo systemctl enable -q gloss && sudo systemctl restart gloss && sleep 1 && systemctl is-active gloss"
 
-# ---------------------------------------------------------------- 4. apache + tls
+# ---------------------------------------------------------------- 5. apache + tls
 have_cert=$(ssh "$HOST" "[ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ] && echo yes || echo no")
 if [ "$have_cert" = "no" ]; then
   echo "==> TLS: no cert yet — bootstrap vhost + certbot webroot"

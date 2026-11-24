@@ -47,6 +47,29 @@
 
 <footer class="legend" id="legend"></footer>
 
+<button class="ask-fab" id="ask-fab" type="button" hidden title="Ask Claude about this page">ask ✦</button>
+<section class="ask" id="ask" hidden aria-label="Ask about this page">
+  <div class="ask-head">
+    <div><span class="ask-title">ask about</span> <b id="ask-word"></b></div>
+    <div class="ask-tools">
+      <button type="button" class="ask-mini" id="ask-clear" title="Forget this conversation">clear</button>
+      <button type="button" class="ask-mini" id="ask-close" title="Close">×</button>
+    </div>
+  </div>
+  <div class="ask-log" id="ask-log">
+    <p class="ask-hint">Claude can see everything on this page and can look further into the dictionary. Ask about any word here: its history, a sound change, why two words are related, where to go next.</p>
+  </div>
+  <form class="ask-gate" id="ask-gate" hidden>
+    <input id="ask-token" type="password" placeholder="passphrase" autocomplete="current-password" aria-label="Passphrase">
+    <button type="submit">unlock</button>
+    <p class="ask-hint">This server asks for a passphrase before spending its Claude budget.</p>
+  </form>
+  <form class="ask-form" id="ask-form">
+    <textarea id="ask-q" rows="2" placeholder="Why did the vowel change? Is this related to…?" aria-label="Your question"></textarea>
+    <button type="submit" id="ask-send" title="Send (Enter)">→</button>
+  </form>
+</section>
+
 <script src="/static/app.js"></script>
 </body>
 </html>
