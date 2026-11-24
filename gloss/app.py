@@ -85,6 +85,31 @@ def lang_names(con) -> dict[str, str]:
     return cache
 
 
+def lang_family(con, lang: str) -> list[str]:
+    """`lang` plus its etymology-only variants: codes like la-lat / la-med /
+    grc-koi that Wiktionary uses in etymologies but never has entries for.
+    Those are recognised as 'base-xxx' codes with zero entries (proto-languages
+    excluded — they are real languages with their own entries)."""
+    fams = getattr(db._local, "fams", None)
+    if fams is None:
+        fams = {}
+        for r in con.execute("SELECT code, n_words FROM lang"):
+            code = r["code"]
+            if "-" in code and not code.endswith("-pro") and r["n_words"] == 0:
+                fams.setdefault(code.split("-", 1)[0], []).append(code)
+        db._local.fams = fams
+    return [lang] + fams.get(lang, [])
+
+
+def base_lang(con, lang: str) -> str:
+    """Map an etymology-only code to the language that holds the entries."""
+    if "-" in lang and not lang.endswith("-pro"):
+        base = lang.split("-", 1)[0]
+        if lang in lang_family(con, base):
+            return base
+    return lang
+
+
 def resolve(con, lang: str, word: str):
     """Find the word-table row for (lang, word).
 
@@ -92,7 +117,9 @@ def resolve(con, lang: str, word: str):
     entry names for proto-languages omit it, etymology templates include it)
     → diacritic-folded within the language. Folding is a last resort because
     proto-language notation uses diacritics phonemically (ǵ vs g).
+    Etymology-only codes (la-lat, grc-koi …) are looked up under their base language.
     """
+    lang = base_lang(con, lang)
     candidates = [word]
     if word.startswith("*"):
         candidates.append(word[1:])
@@ -239,6 +266,11 @@ def graph(lang: str, word: str, limit: int = 60):
     names = lang_names(con)
     word = nfc(word)
     w = resolve(con, lang, word)
+    # an etymology-only code (la-lat) centres on the real language (la); edges
+    # written against any of the family's codes are gathered together
+    lang = base_lang(con, lang)
+    fam = lang_family(con, lang)
+    fam_ph = ",".join("?" * len(fam))
     center_word = w["word"] if w else word
     fw = fold(center_word)
     word = center_word
@@ -248,22 +280,22 @@ def graph(lang: str, word: str, limit: int = 60):
         ph = ",".join("?" * len(rels))
         return con.execute(
             f"""SELECT dst_lang AS lang, dst_word AS word, rel, via, gloss, roman FROM edge
-                WHERE src_lang=? AND src_folded=? AND rel IN ({ph})""",
-            (lang, fw, *rels),
+                WHERE src_lang IN ({fam_ph}) AND src_folded=? AND rel IN ({ph})""",
+            (*fam, fw, *rels),
         ).fetchall()
 
     def rows_in(rels):
         ph = ",".join("?" * len(rels))
         return con.execute(
             f"""SELECT src_lang AS lang, src_word AS word, rel, via, NULL AS gloss, NULL AS roman FROM edge
-                WHERE dst_lang=? AND dst_folded=? AND rel IN ({ph}) LIMIT ?""",
-            (lang, fw, *rels, MAX_PER_GROUP),
+                WHERE dst_lang IN ({fam_ph}) AND dst_folded=? AND rel IN ({ph}) LIMIT ?""",
+            (*fam, fw, *rels, MAX_PER_GROUP),
         ).fetchall()
 
     def dedup(rows):
         best = {}
         for r in rows:
-            k = (r["lang"], fold(r["word"]))
+            k = (base_lang(con, r["lang"]), fold(r["word"]))
             if k == (lang, fw):
                 continue
             if k not in best or (not best[k]["gloss"] and r["gloss"]):
@@ -288,15 +320,16 @@ def graph(lang: str, word: str, limit: int = 60):
 
     # cousins: siblings through each immediate ancestor (other descendants of A)
     cousins = []
-    seen = {(lang, fw)} | {(r["lang"], fold(r["word"])) for r in desc_rows + cog_rows}
+    seen = {(lang, fw)} | {(base_lang(con, r["lang"]), fold(r["word"])) for r in desc_rows + cog_rows}
     for a in anc_rows[:6]:
+        a_fam = lang_family(con, base_lang(con, a["lang"]))
         sib = con.execute(
-            """SELECT src_lang AS lang, src_word AS word, rel FROM edge
-               WHERE dst_lang=? AND dst_folded=? AND rel IN ('inh','bor','der','calque') LIMIT 80""",
-            (a["lang"], fold(a["word"])),
+            f"""SELECT src_lang AS lang, src_word AS word, rel FROM edge
+               WHERE dst_lang IN ({",".join("?" * len(a_fam))}) AND dst_folded=? AND rel IN ('inh','bor','der','calque') LIMIT 80""",
+            (*a_fam, fold(a["word"])),
         ).fetchall()
         for s in sib:
-            k = (s["lang"], fold(s["word"]))
+            k = (base_lang(con, s["lang"]), fold(s["word"]))
             if k in seen:
                 continue
             seen.add(k)
