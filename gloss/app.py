@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, ORJSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .norm import fold, nfc
+from .norm import fold, light_fold, nfc
 
 DB_PATH = os.environ.get("GLOSS_DB", "data/gloss.sqlite")
 STATIC = Path(os.environ.get("GLOSS_STATIC", Path(__file__).resolve().parent.parent / "static"))
@@ -102,10 +102,20 @@ def resolve(con, lang: str, word: str):
         r = con.execute("SELECT * FROM word WHERE lang_code=? AND word=?", (lang, w)).fetchone()
         if r:
             return r
-    return con.execute(
-        "SELECT * FROM word WHERE lang_code=? AND folded=? ORDER BY n_entries DESC, word LIMIT 1",
+    rows = con.execute(
+        "SELECT * FROM word WHERE lang_code=? AND folded=? ORDER BY n_entries DESC, word LIMIT 20",
         (lang, fold(word)),
-    ).fetchone()
+    ).fetchall()
+    if not rows:
+        return None
+    # prefer the row that matches once only entry-name marks are removed
+    lf = light_fold(word)
+    for r in rows:
+        if light_fold(r["word"]) == lf:
+            return r
+    # anything left differs in a mark that may be phonemic (ǵ vs g, ş vs s):
+    # better an "unknown" node than a confidently wrong one
+    return None
 
 
 def display_word(lang: str, word: str) -> str:
@@ -172,7 +182,9 @@ def search(q: str = Query(..., min_length=1, max_length=200), lang: str | None =
     lang_sql = " AND lang_code=?" if lang else ""
     lp = (lang,) if lang else ()
 
-    add(con.execute(f"SELECT * FROM word WHERE word=?{lang_sql} ORDER BY n_entries DESC LIMIT ?", (q, *lp, limit)), "exact")
+    # there is no index on word alone (PK is lang+word), so go through the folded
+    # index and filter: fold(q) is always a superset of the exact match
+    add(con.execute(f"SELECT * FROM word WHERE folded=? AND word=?{lang_sql} ORDER BY n_entries DESC LIMIT ?", (fq, q, *lp, limit)), "exact")
     if len(out) < limit:
         add(con.execute(f"SELECT * FROM word WHERE folded=?{lang_sql} ORDER BY n_entries DESC LIMIT ?", (fq, *lp, limit)), "folded")
     if len(out) < limit and len(fq) >= 2:

@@ -29,5 +29,26 @@ def fold(word: str) -> str:
     return w.casefold()
 
 
+_LIGHT_STRIP = {"̄", "̆"}  # macron, breve — never phonemic in entry names
+_STRESS = {"́", "̀"}  # acute/grave: stress marks on Cyrillic, phonemic elsewhere
+
+
+def light_fold(word: str) -> str:
+    """Only undo what Wiktionary's own entry-name rules undo: macrons, breves,
+    Cyrillic stress marks, and the reconstruction asterisk. Case and all other
+    diacritics are kept, so ǵ stays distinct from g."""
+    if not word:
+        return ""
+    w = unicodedata.normalize("NFD", word.strip().lstrip("*"))
+    out = []
+    for i, ch in enumerate(w):
+        if ch in _LIGHT_STRIP:
+            continue
+        if ch in _STRESS and i and "Ѐ" <= w[i - 1] <= "ԯ":
+            continue
+        out.append(ch)
+    return unicodedata.normalize("NFC", "".join(out))
+
+
 def nfc(word: str) -> str:
     return unicodedata.normalize("NFC", word.strip()) if word else ""
