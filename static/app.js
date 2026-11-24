@@ -95,7 +95,8 @@
 
   /** Build a label spec (lines + bounding box) for a node at angle a (radians). */
   function labelSpec(p, a, compact) {
-    const right = Math.cos(a) > 0.2, left = Math.cos(a) < -0.2;
+    // on narrow screens every label hangs above/below its dot so nothing runs off the sides
+    const right = !compact && Math.cos(a) > 0.2, left = !compact && Math.cos(a) < -0.2;
     const anchor = right ? "start" : left ? "end" : "middle";
     const dx = right ? 10 : left ? -10 : 0;
     const below = Math.sin(a) > 0;
@@ -154,10 +155,10 @@
     const compact = W < 600;
     // inner ring (direct relations) and outer ring (cousins) are ellipses so
     // wide screens get wide layouts; labels hang outward from each ring.
-    const rx1 = Math.max(110, W / 2 - (compact ? 120 : 250));
-    const ry1 = Math.max(110, H / 2 - (compact ? 90 : 120));
-    const rx2 = Math.max(rx1 + 60, W / 2 - (compact ? 60 : 130));
-    const ry2 = Math.max(ry1 + 50, H / 2 - 42);
+    const rx1 = compact ? Math.max(70, W / 2 - 90) : Math.max(110, W / 2 - 250);
+    const ry1 = compact ? Math.max(130, H / 2 - 150) : Math.max(110, H / 2 - 120);
+    const rx2 = compact ? Math.max(rx1 + 30, W / 2 - 50) : Math.max(rx1 + 60, W / 2 - 130);
+    const ry2 = compact ? Math.max(ry1 + 60, H / 2 - 60) : Math.max(ry1 + 50, H / 2 - 42);
 
     const g = el("g", {}, svg);
     el("circle", { class: "center-ring", cx, cy, r: 78 }, g);

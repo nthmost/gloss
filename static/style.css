@@ -90,7 +90,7 @@ a { color: inherit; }
   background: var(--rel-bor);
   box-shadow: 0 0 0 3px var(--paper), 0 0 0 5px var(--rel-inh);
 }
-.search { position: relative; flex: 1; max-width: 640px; }
+.search { position: relative; flex: 1 1 220px; min-width: 0; max-width: 640px; }
 #q {
   width: 100%;
   font: inherit;
