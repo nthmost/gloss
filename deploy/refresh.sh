@@ -40,8 +40,9 @@ NEW=$BUILD/gloss.sqlite.new
 rm -f "$NEW" "$NEW.building"
 "$APP/.venv/bin/python" -m gloss.ingest "$DUMP" "$NEW"
 
-n_words=$(sqlite3 "$NEW" "select value from meta where key='n_words'")
-n_edges=$(sqlite3 "$NEW" "select value from meta where key='n_edges'")
+meta() { "$APP/.venv/bin/python" -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"select value from meta where key=?\",(sys.argv[2],)).fetchone()[0])" "$NEW" "$1"; }
+n_words=$(meta n_words)
+n_edges=$(meta n_edges)
 if [ "${n_words:-0}" -lt "$MIN_WORDS" ]; then
   log "sanity check FAILED: only $n_words words (< $MIN_WORDS); keeping old build"
   exit 2
