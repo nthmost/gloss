@@ -86,14 +86,33 @@ def lang_names(con) -> dict[str, str]:
 
 
 def resolve(con, lang: str, word: str):
-    """Find the word-table row for (lang, word): exact, then diacritic-folded."""
-    r = con.execute("SELECT * FROM word WHERE lang_code=? AND word=?", (lang, word)).fetchone()
-    if r:
-        return r
+    """Find the word-table row for (lang, word).
+
+    Order: exact → exact without/with the reconstruction asterisk (Wiktionary
+    entry names for proto-languages omit it, etymology templates include it)
+    → diacritic-folded within the language. Folding is a last resort because
+    proto-language notation uses diacritics phonemically (ǵ vs g).
+    """
+    candidates = [word]
+    if word.startswith("*"):
+        candidates.append(word[1:])
+    else:
+        candidates.append("*" + word)
+    for w in candidates:
+        r = con.execute("SELECT * FROM word WHERE lang_code=? AND word=?", (lang, w)).fetchone()
+        if r:
+            return r
     return con.execute(
         "SELECT * FROM word WHERE lang_code=? AND folded=? ORDER BY n_entries DESC, word LIMIT 1",
         (lang, fold(word)),
     ).fetchone()
+
+
+def display_word(lang: str, word: str) -> str:
+    """Reconstructed forms are conventionally shown with a leading asterisk."""
+    if lang.endswith("-pro") and word and not word.startswith("*"):
+        return "*" + word
+    return word
 
 
 def node(con, names, lang, word, gloss=None, roman=None):
@@ -102,7 +121,7 @@ def node(con, names, lang, word, gloss=None, roman=None):
     return {
         "lang": lang,
         "lang_name": names.get(lang, lang),
-        "word": w["word"] if w else word,
+        "word": display_word(lang, w["word"] if w else word),
         "known": bool(w),
         "gloss": (w["gloss"] if w and w["gloss"] else gloss) or "",
         "roman": (w["roman"] if w and w["roman"] else roman) or "",
@@ -160,9 +179,12 @@ def search(q: str = Query(..., min_length=1, max_length=200), lang: str | None =
         # FTS5 prefix query on the folded column; quote to neutralise operators
         term = fq.replace('"', '""')
         try:
+            # take a bounded slice of full-text matches first, then rank that
+            # slice (shortest words first); a prefix like "un" matches 100k+ rows
             rows = con.execute(
-                f"""SELECT w.* FROM word_fts f JOIN word w ON w.rowid = f.rowid
-                    WHERE word_fts MATCH ? {('AND w.lang_code=?' if lang else '')}
+                f"""SELECT w.* FROM word w
+                    WHERE w.rowid IN (SELECT rowid FROM word_fts WHERE word_fts MATCH ? LIMIT 3000)
+                    {('AND w.lang_code=?' if lang else '')}
                     ORDER BY length(w.word), w.n_entries DESC LIMIT ?""",
                 (f'folded:"{term}"*', *lp, limit),
             )
@@ -207,6 +229,7 @@ def graph(lang: str, word: str, limit: int = 60):
     w = resolve(con, lang, word)
     center_word = w["word"] if w else word
     fw = fold(center_word)
+    word = center_word
     limit = max(5, min(limit, MAX_PER_GROUP))
 
     def rows_out(rels):
